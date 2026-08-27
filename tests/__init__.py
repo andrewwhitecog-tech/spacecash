@@ -1,0 +1,1 @@
+"""SpaceCash public test package."""
