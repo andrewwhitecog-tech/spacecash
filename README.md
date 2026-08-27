@@ -1,8 +1,10 @@
 # SpaceCash
 
-SpaceCash is an open-source experimental ledger and peer protocol for signed local-devnet transactions, deterministic blocks, checkpoint voting, audit proofs, and explicit release-readiness gates.
+SpaceCash is the open-source ledger engine integrated into NorthStar Prime for signed transactions, deterministic blocks, checkpoint voting, provenance, earned digital rewards, audit proofs, and explicit release-readiness gates.
 
-This repository is the standalone public reference implementation extracted from NorthStar Prime. Version `0.1.0` is a **development network**, not a public mainnet, security-audited cryptocurrency, investment, stablecoin, bank account, or promise of monetary value. Its default chain ID is `spacecash-devnet-1`; the daemon binds to loopback unless an operator deliberately changes it.
+The default profile remains the `spacecash-devnet-1` development network. The production profile is a deliberately non-monetary NorthStar closed loop, not a security-audited cryptocurrency, investment, stablecoin, bank account, legal tender, or promise of monetary value. The public repository is the reusable engine; NorthStar Prime is the product surface.
+
+The production disclosure is: **SPACE is play money for the NorthStar universe. It cannot be bought, sold, or cashed out, and has no monetary value.** See [CLOSED_LOOP_MAINNET.md](docs/spacecash/CLOSED_LOOP_MAINNET.md).
 
 ## What works
 
@@ -24,6 +26,20 @@ pytest
 spacecash status
 spacecashd --host 127.0.0.1 --port 8876
 ```
+
+Closed-loop mainnet requires explicit safety acknowledgements and an operator
+token kept outside the repository:
+
+```powershell
+$env:SPACECASH_NETWORK_PROFILE = "closed-loop-mainnet"
+$env:SPACECASH_MAINNET_ACK = "closed-loop-nonmonetary-v1"
+$env:SPACECASH_DEPLOYMENT_ACK = "monitored-rollback-v1"
+$env:SPACECASH_ADMIN_TOKEN = "<operator secret of at least 32 characters>"
+spacecashd --host 127.0.0.1 --port 8877
+```
+
+Mainnet refuses legacy database relabeling, fiat purchase, public faucet,
+server-generated claim-token wallets, and real-world product redemption.
 
 In another terminal:
 

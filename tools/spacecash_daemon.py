@@ -1,12 +1,13 @@
-"""SpaceCash devnet daemon.
+"""SpaceCash ledger daemon used by NorthStar Prime.
 
-This exposes the extracted `spacecash_core` ledger and shared catalog boundary
-over HTTP without importing the NorthStar Flask app.
+The closed-loop mainnet profile is an NSP-operated internal service. The
+default development profile remains available to engine contributors.
 """
 
 import argparse
 import json
 import os
+import secrets
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,7 +31,8 @@ from tools.spacecash_wallet_custody_evidence import wallet_custody_evidence_temp
 
 def default_db_path():
     app_data = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
-    return Path(os.environ.get("SPACECASH_DB", str(app_data / "SpaceCash" / "spacecash_devnet.sqlite3")))
+    default_name = "spacecash_mainnet.sqlite3" if protocol.IS_CLOSED_LOOP_MAINNET else "spacecash_devnet.sqlite3"
+    return Path(os.environ.get("SPACECASH_DB", str(app_data / "SpaceCash" / default_name)))
 
 
 def default_vault_dir():
@@ -82,6 +84,8 @@ class SpaceCashDaemonHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0:
             return {}
+        if length > 1_000_000:
+            raise ValueError("Request body exceeds the 1 MB limit.")
         raw = self.rfile.read(length).decode("utf-8")
         if not raw.strip():
             return {}
@@ -89,6 +93,32 @@ class SpaceCashDaemonHandler(BaseHTTPRequestHandler):
             return json.loads(raw)
         except json.JSONDecodeError as exc:
             raise ValueError("Request body must be valid JSON.") from exc
+
+    def require_admin(self):
+        if not protocol.IS_CLOSED_LOOP_MAINNET:
+            return
+        expected = str(getattr(self.server, "admin_token", "") or "")
+        supplied = str(self.headers.get("X-SpaceCash-Admin-Token") or "")
+        authorization = str(self.headers.get("Authorization") or "")
+        if authorization.lower().startswith("bearer "):
+            supplied = authorization[7:].strip()
+        if not expected or not supplied or not secrets.compare_digest(expected, supplied):
+            raise PermissionError("Valid SpaceCash operator authorization is required.")
+
+    @staticmethod
+    def admin_path(path):
+        return (
+            path == "/node/label"
+            or path.startswith("/policy/")
+            or path.startswith("/validators")
+            or path.startswith("/bootstrap-peers")
+            or path.startswith("/peers")
+            or path == "/faucet"
+            or path == "/mempool/mine"
+            or path == "/rewards/grant"
+            or path == "/orders/backfill"
+            or (path.startswith("/order/") and path.endswith("/status"))
+        )
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -168,6 +198,7 @@ class SpaceCashDaemonHandler(BaseHTTPRequestHandler):
                         "POST /wallet/new",
                         "POST /wallet/register",
                         "POST /faucet",
+                        "POST /rewards/grant (operator authorization required on mainnet)",
                         "POST /transfer",
                         "POST /redeem",
                         "POST /pay",
@@ -185,6 +216,8 @@ class SpaceCashDaemonHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "service": "spacecash-daemon",
                     "chain_id": protocol.CHAIN_ID,
+                    "network_profile": protocol.NETWORK_PROFILE,
+                    "network_policy": protocol.network_policy(),
                     "time": time.time(),
                 })
                 return
@@ -386,8 +419,11 @@ class SpaceCashDaemonHandler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/") or "/"
         try:
             payload = self.read_json()
+            if self.admin_path(path):
+                self.require_admin()
             if path == "/node/label":
-                self.send_json(self.ledger.set_node_label(payload.get("label") or "SpaceCash Local Devnet Node"))
+                default_label = "SpaceCash NSP Mainnet Node" if protocol.IS_CLOSED_LOOP_MAINNET else "SpaceCash Local Devnet Node"
+                self.send_json(self.ledger.set_node_label(payload.get("label") or default_label))
                 return
             if path == "/policy/producers":
                 producers = payload.get("producers") if isinstance(payload, dict) else payload
@@ -516,6 +552,14 @@ class SpaceCashDaemonHandler(BaseHTTPRequestHandler):
             if path == "/faucet":
                 self.send_json(self.ledger.faucet(payload.get("address"), payload.get("amount")))
                 return
+            if path == "/rewards/grant":
+                self.send_json(self.ledger.grant_reward(
+                    payload.get("address"),
+                    payload.get("amount"),
+                    payload.get("event_id"),
+                    payload.get("reason") or "NorthStar participation reward",
+                ))
+                return
             if path == "/transfer":
                 self.send_json(self.ledger.transfer(payload))
                 return
@@ -567,6 +611,8 @@ class SpaceCashDaemonHandler(BaseHTTPRequestHandler):
             self.send_json({"error": str(exc)}, 404)
         except ProductNotEligible as exc:
             self.send_json({"error": str(exc)}, 400)
+        except PermissionError as exc:
+            self.send_json({"error": str(exc)}, 401)
         except ValueError as exc:
             self.send_json({"error": str(exc)}, 400)
         except Exception as exc:
@@ -574,14 +620,15 @@ class SpaceCashDaemonHandler(BaseHTTPRequestHandler):
 
 
 class SpaceCashHTTPServer(ThreadingHTTPServer):
-    def __init__(self, server_address, handler_class, ledger, catalog):
+    def __init__(self, server_address, handler_class, ledger, catalog, admin_token=None):
         super().__init__(server_address, handler_class)
         self.ledger = ledger
         self.catalog = catalog
+        self.admin_token = admin_token
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Run the SpaceCash devnet daemon")
+    parser = argparse.ArgumentParser(description="Run the SpaceCash NSP ledger daemon")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host")
     parser.add_argument("--port", type=int, default=8876, help="Bind port")
     parser.add_argument("--db", default=str(default_db_path()), help="Path to SpaceCash SQLite ledger")
@@ -593,11 +640,21 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    admin_token = os.environ.get("SPACECASH_ADMIN_TOKEN", "")
+    if protocol.IS_CLOSED_LOOP_MAINNET:
+        if not protocol.MAINNET_ACKNOWLEDGED:
+            raise SystemExit(
+                f"Closed-loop mainnet requires SPACECASH_MAINNET_ACK={protocol.MAINNET_ACK_VALUE}."
+            )
+        if len(admin_token) < 32:
+            raise SystemExit("Closed-loop mainnet requires SPACECASH_ADMIN_TOKEN with at least 32 characters.")
+        if args.host not in {"127.0.0.1", "::1", "localhost"} and os.environ.get("SPACECASH_PUBLIC_BIND_ACK") != "reverse-proxy-firewall-v1":
+            raise SystemExit("Refusing a public mainnet bind without SPACECASH_PUBLIC_BIND_ACK=reverse-proxy-firewall-v1.")
     Path(args.db).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     ledger = SpaceCashLedger(args.db)
     catalog = NorthStarCatalog(args.prime_db, args.chromatic_db)
     ledger.ensure_schema()
-    server = SpaceCashHTTPServer((args.host, args.port), SpaceCashDaemonHandler, ledger, catalog)
+    server = SpaceCashHTTPServer((args.host, args.port), SpaceCashDaemonHandler, ledger, catalog, admin_token=admin_token)
     try:
         print(f"SpaceCash daemon on http://{args.host}:{args.port} using {Path(args.db).resolve()}", flush=True)
     except (AttributeError, OSError, ValueError):

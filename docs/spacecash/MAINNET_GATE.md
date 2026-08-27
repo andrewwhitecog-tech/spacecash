@@ -1,5 +1,22 @@
 # SpaceCash Mainnet Gate
 
+## Two launch lanes
+
+SpaceCash now has two deliberately separate launch lanes:
+
+1. **Closed-loop NorthStar mainnet** — the non-monetary profile in
+   `CLOSED_LOOP_MAINNET.md`. Commerce gates are dormant only while the code
+   enforces no sale, no cash-out, no custody, no exchange, no real-world
+   redemption, and no investment marketing. Technical integrity, deterministic
+   genesis, operator authorization, monitoring, backup, and rollback remain
+   required.
+2. **Convertible or commerce mainnet** — every gate in this document remains a
+   blocker before sale, checkout, exchange, custody, real-world redemption, or
+   monetary-value claims.
+
+The original rules below govern the convertible/commerce lane and reactivate
+automatically when any closed-loop re-entry trigger is proposed.
+
 Current final decision handoff packet: `MAINNET_DECISION_REVIEWER_HANDOFF_2026-06-10.md`.
 
 SpaceCash cannot be called mainnet until every required gate below is complete

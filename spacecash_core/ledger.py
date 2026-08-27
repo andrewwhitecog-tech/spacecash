@@ -255,11 +255,37 @@ class SpaceCashLedger:
                 )
             """)
             now = protocol.utc_now()
+            stored_chain = conn.execute("SELECT value FROM node_config WHERE key = 'chain_id'").fetchone()
+            if stored_chain and stored_chain["value"] != protocol.CHAIN_ID:
+                raise ValueError(
+                    f"Ledger belongs to {stored_chain['value']}; refusing to open it as {protocol.CHAIN_ID}."
+                )
+            if not stored_chain:
+                existing_transactions = int(conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0])
+                if protocol.IS_CLOSED_LOOP_MAINNET and existing_transactions:
+                    raise ValueError(
+                        "Refusing to relabel an existing unbound ledger as mainnet; use a fresh mainnet database."
+                    )
+                conn.execute(
+                    "INSERT INTO node_config(key, value, updated_at) VALUES(?,?,?)",
+                    ("chain_id", protocol.CHAIN_ID, now),
+                )
+            stored_profile = conn.execute("SELECT value FROM node_config WHERE key = 'network_profile'").fetchone()
+            if stored_profile and stored_profile["value"] != protocol.NETWORK_PROFILE:
+                raise ValueError(
+                    f"Ledger uses profile {stored_profile['value']}; refusing profile {protocol.NETWORK_PROFILE}."
+                )
+            if not stored_profile:
+                conn.execute(
+                    "INSERT INTO node_config(key, value, updated_at) VALUES(?,?,?)",
+                    ("network_profile", protocol.NETWORK_PROFILE, now),
+                )
             if not conn.execute("SELECT 1 FROM node_config WHERE key = 'node_id'").fetchone():
                 node_id = "SCNODE-" + protocol.hash_text(secrets.token_hex(32))[:24]
                 conn.execute("INSERT INTO node_config(key, value, updated_at) VALUES(?,?,?)", ("node_id", node_id, now))
             if not conn.execute("SELECT 1 FROM node_config WHERE key = 'node_label'").fetchone():
-                conn.execute("INSERT INTO node_config(key, value, updated_at) VALUES(?,?,?)", ("node_label", "SpaceCash Local Devnet Node", now))
+                default_label = "SpaceCash NSP Mainnet Node" if protocol.IS_CLOSED_LOOP_MAINNET else "SpaceCash Local Devnet Node"
+                conn.execute("INSERT INTO node_config(key, value, updated_at) VALUES(?,?,?)", ("node_label", default_label, now))
             if not conn.execute("SELECT 1 FROM node_config WHERE key = 'allowed_producers_json'").fetchone():
                 conn.execute(
                     "INSERT INTO node_config(key, value, updated_at) VALUES(?,?,?)",
@@ -281,11 +307,19 @@ class SpaceCashLedger:
                 )
             exists = conn.execute("SELECT 1 FROM wallets WHERE address = ?", (protocol.TREASURY,)).fetchone()
             if not exists:
-                now = protocol.utc_now()
-                genesis_txid = protocol.txid("genesis", None, protocol.TREASURY, protocol.GENESIS_UNITS)
+                now = protocol.GENESIS_TIMESTAMP or protocol.utc_now()
+                genesis_txid = protocol.deterministic_genesis_txid() or protocol.txid(
+                    "genesis", None, protocol.TREASURY, protocol.GENESIS_UNITS
+                )
                 conn.execute(
                     "INSERT INTO wallets(address, label, created_at, claim_token, auth_scheme) VALUES(?,?,?,?,?)",
-                    (protocol.TREASURY, "SpaceCash Devnet Treasury", now, None, "treasury"),
+                    (
+                        protocol.TREASURY,
+                        "SpaceCash Closed-Loop Reward Treasury" if protocol.IS_CLOSED_LOOP_MAINNET else "SpaceCash Devnet Treasury",
+                        now,
+                        None,
+                        "treasury",
+                    ),
                 )
                 conn.execute(
                     "INSERT INTO balances(address, units, updated_at) VALUES(?,?,?)",
@@ -294,7 +328,15 @@ class SpaceCashLedger:
                 conn.execute("""
                     INSERT INTO transactions(txid, created_at, kind, sender, recipient, amount_units, memo)
                     VALUES(?,?,?,?,?,?,?)
-                """, (genesis_txid, now, "genesis", None, protocol.TREASURY, protocol.GENESIS_UNITS, "Initial SpaceCash devnet allocation"))
+                """, (
+                    genesis_txid,
+                    now,
+                    "genesis",
+                    None,
+                    protocol.TREASURY,
+                    protocol.GENESIS_UNITS,
+                    "Initial SpaceCash closed-loop mainnet allocation" if protocol.IS_CLOSED_LOOP_MAINNET else "Initial SpaceCash devnet allocation",
+                ))
             self._backfill_blocks(conn)
             conn.commit()
         finally:
@@ -523,7 +565,11 @@ class SpaceCashLedger:
         try:
             return {
                 "node_id": self._node_config(conn, "node_id"),
-                "label": self._node_config(conn, "node_label", "SpaceCash Local Devnet Node"),
+                "label": self._node_config(
+                    conn,
+                    "node_label",
+                    "SpaceCash NSP Mainnet Node" if protocol.IS_CLOSED_LOOP_MAINNET else "SpaceCash Local Devnet Node",
+                ),
                 "chain_id": protocol.CHAIN_ID,
                 "node_protocol_version": protocol.NODE_PROTOCOL_VERSION,
                 "block_version": protocol.BLOCK_VERSION,
@@ -549,14 +595,16 @@ class SpaceCashLedger:
                 "fork_choice_policy": protocol.FORK_CHOICE_POLICY,
                 "producer_policy_version": protocol.PRODUCER_POLICY_VERSION,
                 "producer_id": protocol.PRODUCER_ID,
-                "mode": "local signed devnet",
+                "mode": protocol.NETWORK_MODE,
+                "network_profile": protocol.NETWORK_PROFILE,
             }
         finally:
             conn.close()
 
     def set_node_label(self, label):
         self.ensure_schema()
-        label = str(label or "").strip()[:120] or "SpaceCash Local Devnet Node"
+        default_label = "SpaceCash NSP Mainnet Node" if protocol.IS_CLOSED_LOOP_MAINNET else "SpaceCash Local Devnet Node"
+        label = str(label or "").strip()[:120] or default_label
         conn = self.connect()
         try:
             self._set_node_config(conn, "node_label", label)
@@ -2565,7 +2613,8 @@ class SpaceCashLedger:
                 "chain_id": protocol.CHAIN_ID,
                 "symbol": protocol.SYMBOL,
                 "unit_name": "SpaceCash",
-                "mode": "signed local devnet",
+                "mode": protocol.NETWORK_MODE,
+                "network_profile": protocol.NETWORK_PROFILE,
                 "decimals": protocol.DECIMALS,
                 "signed_payload_version": protocol.SIGNED_PAYLOAD_VERSION,
                 "block_version": protocol.BLOCK_VERSION,
@@ -2579,7 +2628,8 @@ class SpaceCashLedger:
                 "latest_block": latest_block["height"] if latest_block else None,
                 "latest_block_hash": latest_block["block_hash"] if latest_block else None,
                 "treasury": protocol.units_to_amount(treasury_units),
-                "faucet": protocol.units_to_amount(protocol.FAUCET_UNITS),
+                "faucet": None if protocol.IS_CLOSED_LOOP_MAINNET else protocol.units_to_amount(protocol.FAUCET_UNITS),
+                "distribution": "earned NSP participation rewards only" if protocol.IS_CLOSED_LOOP_MAINNET else "development faucet",
             }
         finally:
             conn.close()
@@ -3121,6 +3171,8 @@ class SpaceCashLedger:
             conn.close()
 
     def create_wallet(self, label="Browser Wallet"):
+        if protocol.IS_CLOSED_LOOP_MAINNET:
+            raise ValueError("Mainnet requires a self-custodied signed wallet; register a public key instead.")
         self.ensure_schema()
         address = "SPACE-" + secrets.token_hex(16).upper()
         claim_token = secrets.token_urlsafe(32)
@@ -3188,7 +3240,7 @@ class SpaceCashLedger:
             elif key == "source":
                 actual = str(actual_value or "").strip().lower()
                 wanted = str(expected_value or "").strip().lower()
-            elif key in ("id", "product_id", "version"):
+            elif key in ("product_id", "version"):
                 actual = str(int(actual_value)) if str(actual_value or "").strip() else ""
                 wanted = str(int(expected_value)) if str(expected_value or "").strip() else ""
             else:
@@ -3235,7 +3287,7 @@ class SpaceCashLedger:
                 "signature": str(signature)[:512],
                 "payload": signed_payload,
             }
-        if require_signature:
+        if require_signature or protocol.IS_CLOSED_LOOP_MAINNET:
             raise ValueError("Mempool submissions require a signed SpaceCash payload.")
         self._require_claim(address, request_payload.get("claim_token") or request_payload.get("token"))
         return None
@@ -3464,6 +3516,12 @@ class SpaceCashLedger:
         memo = str(source.get("memo") or "").strip()
         related_source = str(source.get("source") or "").strip()
         related_id = str(source.get("id") or "").strip()
+        if protocol.IS_CLOSED_LOOP_MAINNET and related_source.lower() not in {
+            "nsp_digital", "nsp_game", "nsp_idr", "nsp_profile", "nsp_relic"
+        }:
+            raise ValueError(
+                "Closed-loop mainnet redemption is limited to approved NorthStar digital-only sinks."
+            )
         auth_info = self._authorize_spend(sender, payload, {
             "chain_id": protocol.CHAIN_ID,
             "version": protocol.SIGNED_PAYLOAD_VERSION,
@@ -3477,6 +3535,8 @@ class SpaceCashLedger:
         return self._queue_pending_tx("redeem", sender, protocol.TREASURY, protocol.amount_to_units(amount_text), memo, related_source, related_id, auth_info=auth_info)
 
     def submit_product_redeem(self, payload, product):
+        if not protocol.PHYSICAL_REDEMPTION_ALLOWED:
+            raise ValueError("Closed-loop mainnet forbids redemption for physical products, services, discounts, or money.")
         payload = payload or {}
         product = product or {}
         source_payload = self._spend_source(payload)
@@ -3607,6 +3667,8 @@ class SpaceCashLedger:
 
 
     def stripe_credit_purchase(self, session_id, address, amount, usd_amount=None):
+        if not protocol.FIAT_PURCHASES_ALLOWED:
+            raise ValueError("Closed-loop mainnet forbids buying SPACE with fiat or crypto.")
         self.ensure_schema()
         session_id = str(session_id or "").strip()
         if not re.fullmatch(r"[A-Za-z0-9_.:-]{8,160}", session_id):
@@ -3695,6 +3757,8 @@ class SpaceCashLedger:
         return wallet
 
     def faucet(self, address, amount=None):
+        if not protocol.PUBLIC_FAUCET_ALLOWED:
+            raise ValueError("The public faucet is disabled on closed-loop mainnet; SPACE is earned through NorthStar participation.")
         address = (address or "").strip().upper()
         amount_units = protocol.amount_to_units(amount or protocol.units_to_amount(protocol.FAUCET_UNITS))
         if amount_units > protocol.FAUCET_UNITS:
@@ -3702,6 +3766,71 @@ class SpaceCashLedger:
         txid = self._record_tx("faucet", protocol.TREASURY, address, amount_units, "SpaceCash devnet faucet")
         wallet = self.wallet_summary(address)
         wallet["txid"] = txid
+        return wallet
+
+    def grant_reward(self, address, amount, event_id, reason="NorthStar participation reward"):
+        """Distribute an earned-only reward from treasury with idempotent event evidence."""
+        if not protocol.IS_CLOSED_LOOP_MAINNET:
+            raise ValueError("Earned reward grants are reserved for the closed-loop mainnet profile.")
+        address = str(address or "").strip().upper()
+        if not protocol.valid_address(address) or address == protocol.TREASURY:
+            raise ValueError("A valid non-treasury SpaceCash reward address is required.")
+        event_id = str(event_id or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{8,160}", event_id):
+            raise ValueError("A stable NorthStar reward event id is required.")
+        reason = str(reason or "").strip()[:160]
+        if not reason:
+            raise ValueError("A reward reason is required.")
+        amount_units = protocol.amount_to_units(amount)
+        if amount_units > protocol.MAX_REWARD_UNITS:
+            raise ValueError(
+                f"Reward exceeds the per-event limit of {protocol.units_to_amount(protocol.MAX_REWARD_UNITS)} {protocol.SYMBOL}."
+            )
+        self.ensure_schema()
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                """
+                SELECT txid, recipient, amount_units
+                FROM transactions
+                WHERE kind = 'reward' AND related_source = 'nsp_reward' AND related_id = ?
+                """,
+                (event_id,),
+            ).fetchone()
+            if existing:
+                if existing["recipient"] != address or int(existing["amount_units"]) != amount_units:
+                    raise ValueError("Reward event id is already bound to a different grant.")
+                conn.commit()
+                wallet = self.wallet_summary(address)
+                wallet["txid"] = existing["txid"]
+                wallet["reward"] = {"granted": False, "idempotent": True, "event_id": event_id}
+                return wallet
+            txid = self._record_tx_locked(
+                conn,
+                "reward",
+                protocol.TREASURY,
+                address,
+                amount_units,
+                reason,
+                "nsp_reward",
+                event_id,
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        wallet = self.wallet_summary(address)
+        wallet["txid"] = txid
+        wallet["reward"] = {
+            "granted": True,
+            "idempotent": False,
+            "event_id": event_id,
+            "reason": reason,
+            "amount": protocol.units_to_amount(amount_units),
+        }
         return wallet
 
     def transfer(self, payload):
@@ -3734,6 +3863,12 @@ class SpaceCashLedger:
         memo = str(source.get("memo") or "").strip()
         related_source = str(source.get("source") or "").strip()
         related_id = str(source.get("id") or "").strip()
+        if protocol.IS_CLOSED_LOOP_MAINNET and related_source.lower() not in {
+            "nsp_digital", "nsp_game", "nsp_idr", "nsp_profile", "nsp_relic"
+        }:
+            raise ValueError(
+                "Closed-loop mainnet redemption is limited to approved NorthStar digital-only sinks."
+            )
         auth_info = self._authorize_spend(sender, payload, {
             "chain_id": protocol.CHAIN_ID,
             "version": protocol.SIGNED_PAYLOAD_VERSION,
@@ -3751,6 +3886,8 @@ class SpaceCashLedger:
         return wallet
 
     def product_redeem(self, payload, product):
+        if not protocol.PHYSICAL_REDEMPTION_ALLOWED:
+            raise ValueError("Closed-loop mainnet forbids redemption for physical products, services, discounts, or money.")
         payload = payload or {}
         product = product or {}
         source_payload = self._spend_source(payload)
@@ -4231,10 +4368,90 @@ class SpaceCashLedger:
                 "detail": "Produce launch, monitoring, archive, and rollback procedures.",
             },
         ]
+        if protocol.IS_CLOSED_LOOP_MAINNET:
+            genesis_tx = self.transaction(protocol.deterministic_genesis_txid())
+            commitments = protocol.network_policy()["commitments"]
+            closed_loop_enforced = all(
+                commitments[key] is False
+                for key in (
+                    "fiat_purchases_allowed",
+                    "physical_redemption_allowed",
+                    "cash_redemption_allowed",
+                    "custodial_wallets_allowed",
+                    "exchange_integration_allowed",
+                    "investment_marketing_allowed",
+                    "public_faucet_allowed",
+                )
+            )
+            automated_gates.extend([
+                automated_gate(
+                    "closed_loop_mainnet_profile",
+                    protocol.CHAIN_ID == "spacecash-mainnet-1",
+                    "The process must run the explicit closed-loop mainnet network profile.",
+                    {"network_profile": protocol.NETWORK_PROFILE, "chain_id": protocol.CHAIN_ID},
+                ),
+                automated_gate(
+                    "deterministic_mainnet_genesis",
+                    bool(genesis_tx and genesis_tx.get("created_at") == protocol.GENESIS_TIMESTAMP),
+                    "Mainnet must start from the fixed published genesis transaction and timestamp.",
+                    {
+                        "txid": protocol.deterministic_genesis_txid(),
+                        "timestamp": protocol.GENESIS_TIMESTAMP,
+                    },
+                ),
+                automated_gate(
+                    "closed_loop_boundaries_enforced",
+                    closed_loop_enforced,
+                    "Fiat purchase, real-world redemption, custody, exchange, investment marketing, and public faucet paths must be disabled.",
+                    commitments,
+                ),
+                automated_gate(
+                    "operator_mainnet_acknowledged",
+                    protocol.MAINNET_ACKNOWLEDGED,
+                    "The operator must explicitly acknowledge the non-monetary mainnet charter.",
+                    {"acknowledged": protocol.MAINNET_ACKNOWLEDGED},
+                ),
+            ])
+            manual_gates = [
+                {
+                    "id": "public_testnet_complete",
+                    "status": "advisory_pending",
+                    "severity": "advisory",
+                    "detail": "Independent public-node testing remains strongly recommended and is required before any commerce re-entry.",
+                },
+                {
+                    "id": "external_security_review_complete",
+                    "status": "advisory_pending",
+                    "severity": "advisory",
+                    "detail": "External review remains recommended and becomes a blocker before any monetary, custody, or real-world redemption use.",
+                },
+                {
+                    "id": "legal_compliance_review_complete",
+                    "status": "pass",
+                    "severity": "blocker",
+                    "detail": "Dormant only while executable closed-loop commitments remain enforced; any commerce re-entry trigger restores this gate.",
+                },
+                {
+                    "id": "wallet_recovery_custody_policy_complete",
+                    "status": "pass",
+                    "severity": "blocker",
+                    "detail": "Server custody is prohibited; only self-managed signed wallets are accepted on mainnet.",
+                },
+                {
+                    "id": "production_deployment_runbook_complete",
+                    "status": "pass" if protocol.DEPLOYMENT_ACKNOWLEDGED else "manual_blocker",
+                    "severity": "blocker",
+                    "detail": "A monitored deployment, archived backup, recovery test, and rollback acknowledgement are required.",
+                },
+            ]
         automated_blockers = [gate["id"] for gate in automated_gates if gate["status"] != "pass"]
-        manual_blockers = [gate["id"] for gate in manual_gates if gate["status"] != "pass"]
+        manual_blockers = [
+            gate["id"]
+            for gate in manual_gates
+            if gate.get("severity") == "blocker" and gate["status"] != "pass"
+        ]
         automated_release_candidate = not automated_blockers
-        mainnet_ready = automated_release_candidate and not manual_blockers
+        mainnet_ready = protocol.IS_CLOSED_LOOP_MAINNET and automated_release_candidate and not manual_blockers
         next_actions = [
             gate["detail"]
             for gate in automated_gates + manual_gates
@@ -4243,6 +4460,8 @@ class SpaceCashLedger:
         return {
             "chain_id": protocol.CHAIN_ID,
             "mode": "mainnet-readiness-v1",
+            "network_profile": protocol.NETWORK_PROFILE,
+            "network_policy": protocol.network_policy(),
             "mainnet_ready": mainnet_ready,
             "automated_release_candidate": automated_release_candidate,
             "automated_blockers": automated_blockers,

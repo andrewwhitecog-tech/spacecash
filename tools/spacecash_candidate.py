@@ -72,7 +72,7 @@ def remove_candidate_db(db_path):
             candidate.unlink()
 
 
-def build_candidate(db_path, bootstrap_peers=None, keys_out=None, force=False, validator_count=1, validator_quorum=None):
+def build_candidate(db_path, bootstrap_peers=None, keys_out=None, force=False, validator_count=1, validator_quorum=None, key_purpose="development-candidate"):
     db_path = Path(db_path)
     if db_path.exists() and not force:
         raise ValueError(f"Candidate DB already exists: {db_path}")
@@ -84,22 +84,37 @@ def build_candidate(db_path, bootstrap_peers=None, keys_out=None, force=False, v
     validator_quorum = int(validator_quorum or min(validator_count, protocol.DEFAULT_VALIDATOR_QUORUM))
     if validator_quorum < 1 or validator_quorum > validator_count:
         raise ValueError("Validator quorum must be between 1 and validator_count.")
+    key_purpose = str(key_purpose or "development-candidate").strip().lower()
+    if key_purpose not in {"development-candidate", "production-closed-loop-mainnet"}:
+        raise ValueError("Unsupported validator key purpose.")
+    if key_purpose == "production-closed-loop-mainnet" and not protocol.IS_CLOSED_LOOP_MAINNET:
+        raise ValueError("Production validator keys require the closed-loop mainnet profile.")
 
+    production_keys = key_purpose == "production-closed-loop-mainnet"
     ledger = SpaceCashLedger(db_path)
     validators = []
     for index in range(validator_count):
-        validator, validator_key = generate_signed_wallet(ledger, f"Candidate Validator {index + 1}")
+        validator_label = f"NSP Mainnet Validator {index + 1}" if production_keys else f"Candidate Validator {index + 1}"
+        validator, validator_key = generate_signed_wallet(ledger, validator_label)
         validators.append({"wallet": validator, "key": validator_key})
     primary_validator = validators[0]
-    recipient, recipient_key = generate_signed_wallet(ledger, "Candidate Recipient")
+    recipient, recipient_key = generate_signed_wallet(ledger, "NSP Mainnet Bootstrap Receipt" if production_keys else "Candidate Recipient")
 
-    ledger.faucet(primary_validator["wallet"]["address"], "25")
+    if protocol.IS_CLOSED_LOOP_MAINNET:
+        ledger.grant_reward(
+            primary_validator["wallet"]["address"],
+            "25",
+            "mainnet.bootstrap.genesis-validation.validator-1" if production_keys else "candidate.genesis-validation.validator-1",
+            "NSP mainnet bootstrap validator participation reward" if production_keys else "Candidate genesis validation participation reward",
+        )
+    else:
+        ledger.faucet(primary_validator["wallet"]["address"], "25")
     queued = ledger.submit_transfer(signed_transfer(
         primary_validator["key"],
         primary_validator["wallet"]["address"],
         recipient["address"],
         "1",
-        "Candidate signed transfer",
+        "NSP mainnet bootstrap signed transfer" if production_keys else "Candidate signed transfer",
     ))
     mined = ledger.mine_pending_transactions()
 
@@ -135,7 +150,8 @@ def build_candidate(db_path, bootstrap_peers=None, keys_out=None, force=False, v
         keys_out = Path(keys_out)
         keys_out.parent.mkdir(parents=True, exist_ok=True)
         keys_out.write_text(json.dumps({
-            "warning": "Development candidate keys. Do not use these keys for mainnet custody.",
+            "warning": "Production NSP validator keys; encrypt immediately and never use for user custody." if production_keys else "Development candidate keys. Do not use these keys for mainnet custody.",
+            "key_purpose": key_purpose,
             "chain_id": protocol.CHAIN_ID,
             "validators": [
                 {
@@ -195,6 +211,7 @@ def build_parser():
     parser.add_argument("--keys-out", type=Path, help="Optional development private-key JSON output")
     parser.add_argument("--validators", type=int, default=1, help="Number of signed validator wallets to create")
     parser.add_argument("--quorum", type=int, help="Validator checkpoint quorum")
+    parser.add_argument("--key-purpose", choices=("development-candidate", "production-closed-loop-mainnet"), default="development-candidate", help="Declare how emitted validator keys will be protected and used")
     parser.add_argument("--force", action="store_true", help="Overwrite the candidate DB if it already exists")
     return parser
 
@@ -209,6 +226,7 @@ def main(argv=None):
             force=args.force,
             validator_count=args.validators,
             validator_quorum=args.quorum,
+            key_purpose=args.key_purpose,
         )
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, indent=2, sort_keys=True))

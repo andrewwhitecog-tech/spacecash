@@ -8,6 +8,7 @@ existing integration.
 import base64
 import hashlib
 import json
+import os
 import re
 import secrets
 from datetime import datetime, timezone
@@ -16,28 +17,53 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 SYMBOL = "SPACE"
 UNIT = 1_000_000
 DECIMALS = 6
-CHAIN_ID = "spacecash-devnet-1"
+DEVNET_PROFILE = "devnet"
+CLOSED_LOOP_MAINNET_PROFILE = "closed-loop-mainnet"
+NETWORK_PROFILE = os.environ.get("SPACECASH_NETWORK_PROFILE", DEVNET_PROFILE).strip().lower()
+if NETWORK_PROFILE not in {DEVNET_PROFILE, CLOSED_LOOP_MAINNET_PROFILE}:
+    raise RuntimeError(
+        "SPACECASH_NETWORK_PROFILE must be 'devnet' or 'closed-loop-mainnet'."
+    )
+IS_CLOSED_LOOP_MAINNET = NETWORK_PROFILE == CLOSED_LOOP_MAINNET_PROFILE
+MAINNET_ACK_VALUE = "closed-loop-nonmonetary-v1"
+MAINNET_ACKNOWLEDGED = (
+    os.environ.get("SPACECASH_MAINNET_ACK", "").strip().lower() == MAINNET_ACK_VALUE
+)
+DEPLOYMENT_ACK_VALUE = "monitored-rollback-v1"
+DEPLOYMENT_ACKNOWLEDGED = (
+    os.environ.get("SPACECASH_DEPLOYMENT_ACK", "").strip().lower() == DEPLOYMENT_ACK_VALUE
+)
+CHAIN_ID = "spacecash-mainnet-1" if IS_CLOSED_LOOP_MAINNET else "spacecash-devnet-1"
+NETWORK_MODE = "closed-loop non-monetary mainnet" if IS_CLOSED_LOOP_MAINNET else "local signed devnet"
+GENESIS_TIMESTAMP = "2026-08-27T22:30:00Z" if IS_CLOSED_LOOP_MAINNET else None
+FIAT_PURCHASES_ALLOWED = not IS_CLOSED_LOOP_MAINNET
+PHYSICAL_REDEMPTION_ALLOWED = not IS_CLOSED_LOOP_MAINNET
+PUBLIC_FAUCET_ALLOWED = not IS_CLOSED_LOOP_MAINNET
+CASH_REDEMPTION_ALLOWED = False
+CUSTODIAL_WALLETS_ALLOWED = False
+EXCHANGE_INTEGRATION_ALLOWED = False
+INVESTMENT_MARKETING_ALLOWED = False
 SIGNED_PAYLOAD_VERSION = 1
 WALLET_EXPORT_VERSION = 1
 WALLET_EXPORT_KDF = "PBKDF2-SHA256-250000"
 WALLET_EXPORT_CIPHER = "AES-256-GCM"
 MONETARY_POLICY_VERSION = 1
-MONETARY_POLICY_ID = "spacecash-devnet-monetary-policy-v1"
+MONETARY_POLICY_ID = f"spacecash-{NETWORK_PROFILE}-monetary-policy-v1"
 GENESIS_PLAN_VERSION = 1
-GENESIS_PLAN_ID = "spacecash-devnet-genesis-plan-v1"
+GENESIS_PLAN_ID = f"spacecash-{NETWORK_PROFILE}-genesis-plan-v1"
 WALLET_POLICY_VERSION = 1
-WALLET_POLICY_ID = "spacecash-devnet-wallet-policy-v1"
+WALLET_POLICY_ID = f"spacecash-{NETWORK_PROFILE}-wallet-policy-v1"
 ADDRESS_VERSION = 1
 ADDRESS_PREFIX = "SPACE"
 MIN_BACKUP_PASSPHRASE_LENGTH = 12
 BLOCK_VERSION = 2
-PRODUCER_ID = "spacecash-devnet-producer-1"
+PRODUCER_ID = "spacecash-mainnet-producer-1" if IS_CLOSED_LOOP_MAINNET else "spacecash-devnet-producer-1"
 NODE_PROTOCOL_VERSION = 1
 CONSENSUS_SPEC_VERSION = 1
-CONSENSUS_SPEC_ID = "spacecash-devnet-consensus-v1"
+CONSENSUS_SPEC_ID = f"spacecash-{NETWORK_PROFILE}-consensus-v1"
 SYMBOLIC_VALUE_VERSION = 1
 SYMBOLIC_VALUE_ID = "spacecash-vorath-symbolic-value-v1"
-FORK_CHOICE_POLICY = "spacecash-devnet-append-only-v1"
+FORK_CHOICE_POLICY = f"spacecash-{NETWORK_PROFILE}-append-only-v1"
 PRODUCER_POLICY_VERSION = 1
 DEFAULT_ALLOWED_PRODUCERS = (PRODUCER_ID,)
 DEFAULT_BOOTSTRAP_PEERS = ()
@@ -46,11 +72,67 @@ DEFAULT_VALIDATOR_QUORUM = 1
 TREASURY = "SPACE-TREASURY"
 GENESIS_UNITS = 1_000_000_000 * UNIT
 FAUCET_UNITS = 250 * UNIT
+MAX_REWARD_UNITS = 10_000 * UNIT
 USD_RATE = Decimal("1.00")
 VORATH_VOID_CODE = "000"
 VORATH_OVERLOAD_CODE = "999"
 VORATH_COLLAPSE_CODE = "000999"
 VORATH_COLLAPSE_INTEGER = int("999", 16)
+
+
+def network_policy():
+    """Return the executable product boundary for the selected network."""
+    return {
+        "id": "spacecash-closed-loop-nonmonetary-v1" if IS_CLOSED_LOOP_MAINNET else "spacecash-devnet-experimental-v1",
+        "network_profile": NETWORK_PROFILE,
+        "chain_id": CHAIN_ID,
+        "mode": NETWORK_MODE,
+        "mainnet_ack_required": IS_CLOSED_LOOP_MAINNET,
+        "mainnet_acknowledged": MAINNET_ACKNOWLEDGED,
+        "mainnet_ack_value": MAINNET_ACK_VALUE if IS_CLOSED_LOOP_MAINNET else None,
+        "deployment_ack_required": IS_CLOSED_LOOP_MAINNET,
+        "deployment_acknowledged": DEPLOYMENT_ACKNOWLEDGED,
+        "deployment_ack_value": DEPLOYMENT_ACK_VALUE if IS_CLOSED_LOOP_MAINNET else None,
+        "commitments": {
+            "earned_only": IS_CLOSED_LOOP_MAINNET,
+            "intangibles_only": IS_CLOSED_LOOP_MAINNET,
+            "fiat_purchases_allowed": FIAT_PURCHASES_ALLOWED,
+            "physical_redemption_allowed": PHYSICAL_REDEMPTION_ALLOWED,
+            "cash_redemption_allowed": CASH_REDEMPTION_ALLOWED,
+            "custodial_wallets_allowed": CUSTODIAL_WALLETS_ALLOWED,
+            "exchange_integration_allowed": EXCHANGE_INTEGRATION_ALLOWED,
+            "investment_marketing_allowed": INVESTMENT_MARKETING_ALLOWED,
+            "public_faucet_allowed": PUBLIC_FAUCET_ALLOWED,
+        },
+        "disclosure": (
+            "SPACE is play money for the NorthStar universe. It cannot be bought, "
+            "sold, or cashed out, and has no monetary value."
+            if IS_CLOSED_LOOP_MAINNET
+            else "Development network only; not public money, mainnet, or an investment."
+        ),
+        "commerce_reentry_triggers": [
+            "sale for fiat or crypto",
+            "cash-out, exchange, or buyback",
+            "custody for another person",
+            "payment for physical goods, services, or discounts",
+            "investment or future-value marketing",
+        ],
+        "reward_policy": {
+            "source": "nsp_reward",
+            "earned_only": IS_CLOSED_LOOP_MAINNET,
+            "maximum_reward_units": MAX_REWARD_UNITS,
+            "maximum_reward": units_to_amount(MAX_REWARD_UNITS),
+            "idempotency_required": True,
+            "operator_auth_required": IS_CLOSED_LOOP_MAINNET,
+        },
+    }
+
+
+def deterministic_genesis_txid():
+    if not IS_CLOSED_LOOP_MAINNET:
+        return None
+    seed = f"{CHAIN_ID}|genesis|{TREASURY}|{GENESIS_UNITS}|{GENESIS_TIMESTAMP}"
+    return "SCTX-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24].upper()
 
 
 def utc_now():
@@ -274,9 +356,13 @@ def consensus_spec():
         "id": CONSENSUS_SPEC_ID,
         "version": CONSENSUS_SPEC_VERSION,
         "chain_id": CHAIN_ID,
-        "mode": "local signed devnet",
+        "mode": NETWORK_MODE,
         "node_protocol_version": NODE_PROTOCOL_VERSION,
-        "scope": "Defines the current reviewable devnet consensus envelope. It is not a public mainnet consensus protocol.",
+        "scope": (
+            "Defines the production consensus envelope for the non-monetary NorthStar closed-loop network."
+            if IS_CLOSED_LOOP_MAINNET
+            else "Defines the current reviewable devnet consensus envelope. It is not a public mainnet consensus protocol."
+        ),
         "ledger": {
             "storage": "SQLite local ledger",
             "supply_units": GENESIS_UNITS,
@@ -355,14 +441,22 @@ def wallet_policy():
         "id": WALLET_POLICY_ID,
         "version": WALLET_POLICY_VERSION,
         "chain_id": CHAIN_ID,
-        "mode": "local signed devnet",
-        "scope": "Defines the current wallet recovery and custody boundary. It is not a production custody approval.",
+        "mode": NETWORK_MODE,
+        "scope": (
+            "Defines non-custodial self-managed wallets for a non-monetary closed-loop network; server custody is prohibited."
+            if IS_CLOSED_LOOP_MAINNET
+            else "Defines the current wallet recovery and custody boundary. It is not a production custody approval."
+        ),
         "addressing": {
             "address_version": ADDRESS_VERSION,
             "address_prefix": ADDRESS_PREFIX,
             "address_rule": ADDRESS_PREFIX + "-" + "SHA256(canonical public JWK)[:32]",
             "chain_specific_replay_protection": "signed spends bind chain_id and payload version",
-            "mainnet_gap": "final public mainnet address version and migration policy require review",
+            "mainnet_gap": (
+                "none for closed-loop v1; signed payloads bind the mainnet chain id"
+                if IS_CLOSED_LOOP_MAINNET
+                else "final public mainnet address version and migration policy require review"
+            ),
         },
         "signing": {
             "algorithm": "ECDSA P-256",
@@ -389,8 +483,8 @@ def wallet_policy():
             "user_backup_verification_status": "manual_export_import_flow_only",
         },
         "custody": {
-            "current_model": "non_custodial_browser_devnet",
-            "production_custody_status": "not_approved",
+            "current_model": "non_custodial_closed_loop" if IS_CLOSED_LOOP_MAINNET else "non_custodial_browser_devnet",
+            "production_custody_status": "prohibited" if IS_CLOSED_LOOP_MAINNET else "not_approved",
             "hardware_wallet_support": "not_implemented",
             "custodial_operations_allowed": False,
             "development_candidate_keys": "unsafe_for_custody",
@@ -405,8 +499,12 @@ def wallet_policy():
         ],
         "manual_gate": {
             "id": "wallet_recovery_custody_policy_complete",
-            "status": "not_complete",
-            "reason": "Production recovery, address versioning, backup rotation, hardware/custody, and operating procedures still require approval.",
+            "status": "dormant_closed_loop" if IS_CLOSED_LOOP_MAINNET else "not_complete",
+            "reason": (
+                "Custody is prohibited in the closed-loop profile; users retain their own keys and lost keys are unrecoverable."
+                if IS_CLOSED_LOOP_MAINNET
+                else "Production recovery, address versioning, backup rotation, hardware/custody, and operating procedures still require approval."
+            ),
         },
     }
     policy["policy_hash"] = hash_text(canonical_json({k: v for k, v in policy.items() if k != "policy_hash"}))
@@ -422,8 +520,12 @@ def monetary_policy():
         "id": MONETARY_POLICY_ID,
         "version": MONETARY_POLICY_VERSION,
         "chain_id": CHAIN_ID,
-        "mode": "local signed devnet",
-        "scope": "Defines current SpaceCash devnet supply, issuance, fee, and treasury rules. It is not a public mainnet tokenomics approval.",
+        "mode": NETWORK_MODE,
+        "scope": (
+            "Defines fixed-supply play-money accounting for NorthStar digital participation; no sale, cash value, or real-world redemption."
+            if IS_CLOSED_LOOP_MAINNET
+            else "Defines current SpaceCash devnet supply, issuance, fee, and treasury rules. It is not a public mainnet tokenomics approval."
+        ),
         "unit": {
             "symbol": SYMBOL,
             "decimals": DECIMALS,
@@ -450,13 +552,17 @@ def monetary_policy():
             "treasury": TREASURY,
         },
         "issuance": {
-            "genesis_allocation": "100% of current devnet supply is allocated to the devnet treasury at genesis.",
+            "genesis_allocation": (
+                "100% of fixed play-money supply is locked in the published NorthStar reward treasury at genesis."
+                if IS_CLOSED_LOOP_MAINNET
+                else "100% of current devnet supply is allocated to the devnet treasury at genesis."
+            ),
             "block_reward_units": 0,
             "staking_reward_units": 0,
             "mining_enabled": False,
             "mint_route_available": False,
             "emission_schedule": "fixed genesis allocation only",
-            "faucet_source": "treasury transfer only",
+            "faucet_source": "disabled on mainnet; rewards require an operator-controlled distribution path" if IS_CLOSED_LOOP_MAINNET else "treasury transfer only",
             "faucet_units": FAUCET_UNITS,
             "faucet_amount": units_to_amount(FAUCET_UNITS),
         },
@@ -465,15 +571,15 @@ def monetary_policy():
             "protocol_transfer_fee": units_to_amount(0),
             "fee_market": "not_implemented",
             "burn_policy": "not_implemented",
-            "checkout_reference_rate": f"1 {SYMBOL} = {USD_RATE} USD for devnet product checkout accounting",
-            "mainnet_gap": "Final fees, burns, exchange-rate language, and market disclosures require legal/product review.",
+            "checkout_reference_rate": "none; SPACE has no fiat or crypto exchange rate" if IS_CLOSED_LOOP_MAINNET else f"1 {SYMBOL} = {USD_RATE} USD for devnet product checkout accounting",
+            "mainnet_gap": "none for the closed-loop v1 profile; any commerce conversion reactivates review gates" if IS_CLOSED_LOOP_MAINNET else "Final fees, burns, exchange-rate language, and market disclosures require legal/product review.",
         },
         "treasury_controls": {
-            "current_treasury_model": "single devnet treasury address",
-            "treasury_spend_path": "faucet and signed treasury transfers only",
+            "current_treasury_model": "published closed-loop reward treasury" if IS_CLOSED_LOOP_MAINNET else "single devnet treasury address",
+            "treasury_spend_path": "operator-controlled earned-reward distribution only" if IS_CLOSED_LOOP_MAINNET else "faucet and signed treasury transfers only",
             "multisig_status": "not_implemented",
             "vesting_or_distribution_schedule": "not_approved",
-            "production_status": "not_approved",
+            "production_status": "non_monetary_closed_loop" if IS_CLOSED_LOOP_MAINNET else "not_approved",
         },
         "audit_controls": [
             "audit recomputes balances from transaction history",
@@ -491,8 +597,12 @@ def monetary_policy():
         ],
         "manual_gate": {
             "id": "legal_compliance_review_complete",
-            "status": "not_complete",
-            "reason": "Public tokenomics, distribution, treasury controls, fee policy, and market disclosures still require legal/compliance/product approval.",
+            "status": "dormant_closed_loop" if IS_CLOSED_LOOP_MAINNET else "not_complete",
+            "reason": (
+                "The non-monetary profile forbids sale, cash-out, custody, exchange integration, and real-world redemption; any re-entry trigger restores this gate."
+                if IS_CLOSED_LOOP_MAINNET
+                else "Public tokenomics, distribution, treasury controls, fee policy, and market disclosures still require legal/compliance/product approval."
+            ),
         },
     }
     policy["policy_hash"] = hash_text(canonical_json({k: v for k, v in policy.items() if k != "policy_hash"}))
@@ -508,21 +618,25 @@ def genesis_plan():
         "id": GENESIS_PLAN_ID,
         "version": GENESIS_PLAN_VERSION,
         "chain_id": CHAIN_ID,
-        "mode": "local signed devnet",
-        "scope": "Defines the current reviewed boundary between historical devnet state, clean candidates, and any future mainnet genesis. It is not a mainnet allocation approval.",
+        "mode": NETWORK_MODE,
+        "scope": (
+            "Defines the deterministic closed-loop mainnet genesis; historical devnet state never migrates."
+            if IS_CLOSED_LOOP_MAINNET
+            else "Defines the current reviewed boundary between historical devnet state, clean candidates, and any future mainnet genesis. It is not a mainnet allocation approval."
+        ),
         "source_of_truth": {
             "current_devnet_db": "spacecash_devnet.sqlite3 is historical local devnet state only",
             "release_candidate_db": "tools/spacecash_candidate.py builds a fresh signed-only candidate ledger for automated gate proof",
-            "mainnet_genesis_source": "fresh reviewed genesis allocation file, not a mutation of historical devnet state",
+            "mainnet_genesis_source": "fixed protocol treasury allocation at the published genesis timestamp" if IS_CLOSED_LOOP_MAINNET else "fresh reviewed genesis allocation file, not a mutation of historical devnet state",
             "devnet_history_carried_to_mainnet": False,
         },
         "allocation_boundary": {
             "supply_cap_units": GENESIS_UNITS,
             "supply_cap": units_to_amount(GENESIS_UNITS),
             "treasury_address": TREASURY,
-            "allocation_file_status": "not_approved",
-            "public_distribution_status": "not_approved",
-            "treasury_governance_status": "not_approved",
+            "allocation_file_status": "fixed_closed_loop_treasury" if IS_CLOSED_LOOP_MAINNET else "not_approved",
+            "public_distribution_status": "earned_only" if IS_CLOSED_LOOP_MAINNET else "not_approved",
+            "treasury_governance_status": "operator_reward_distribution_only" if IS_CLOSED_LOOP_MAINNET else "not_approved",
             "devnet_wallet_balances_auto_migrate": False,
             "candidate_private_keys_allowed": False,
         },
@@ -556,10 +670,16 @@ def genesis_plan():
             "final mainnet chain id and address version",
             "legal/compliance approval",
         ],
+        "genesis_timestamp": GENESIS_TIMESTAMP,
+        "genesis_txid": deterministic_genesis_txid(),
         "manual_gate": {
             "id": "production_deployment_runbook_complete",
-            "status": "not_complete",
-            "reason": "A fresh reviewed genesis allocation, deployment archive, and rollback procedure are required before launch.",
+            "status": "technical_launch_required" if IS_CLOSED_LOOP_MAINNET else "not_complete",
+            "reason": (
+                "The deterministic genesis is fixed; monitored deployment and rollback evidence remain technical launch requirements."
+                if IS_CLOSED_LOOP_MAINNET
+                else "A fresh reviewed genesis allocation, deployment archive, and rollback procedure are required before launch."
+            ),
         },
     }
     plan["plan_hash"] = hash_text(canonical_json({k: v for k, v in plan.items() if k != "plan_hash"}))
@@ -572,6 +692,8 @@ def genesis_plan_hash():
 
 def chain_config():
     return {
+        "network_profile": NETWORK_PROFILE,
+        "network_policy": network_policy(),
         "chain_id": CHAIN_ID,
         "symbol": SYMBOL,
         "decimals": DECIMALS,
@@ -619,5 +741,5 @@ def chain_config():
         "fork_choice_rule": "higher validated height is only importable when the peer chain is an append-only extension of the local tip",
         "producer_policy_rule": "new versioned blocks must be produced by a locally allowed producer id",
         "validator_policy_rule": "checkpoint votes must be signed by locally registered validator wallets",
-        "mode": "local signed devnet",
+        "mode": NETWORK_MODE,
     }
