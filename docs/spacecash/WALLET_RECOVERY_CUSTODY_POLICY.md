@@ -5,7 +5,9 @@ Current reviewer handoff packet: `WALLET_CUSTODY_REVIEWER_HANDOFF_2026-06-10.md`
 ## Current State
 
 SpaceCash browser wallets use signed P-256 spends and encrypted browser backup
-JSON. This is suitable for local signed devnet testing, not production custody.
+JSON. The NSP production profile is user-controlled and non-custodial: the
+server does not hold or recover user private keys. This design is not
+authorization to offer custody.
 
 Generate the machine-readable wallet policy:
 
@@ -52,7 +54,7 @@ final reviewer-completed evidence file passes `--require-complete`.
 - Development candidate private keys are excluded from release/testnet bundles
   by default and are labeled unsafe when explicitly exported.
 
-## Required Before Mainnet
+## Required Before Custody Or Monetary Expansion
 
 - Recovery phrase or equivalent deterministic key recovery standard.
 - Final address versioning and chain-specific replay/migration policy.

@@ -1,11 +1,15 @@
 """SQLite-backed SpaceCash devnet ledger and audit interface."""
 
+import ipaddress
 import json
+import os
 import re
 import secrets
 import shutil
+import socket
 import sqlite3
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -20,6 +24,13 @@ except ImportError:
     hashes = None
     ec = None
     crypto_utils = None
+
+
+class _SpaceCashNoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects so a validated peer cannot bounce into an internal service."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, "Peer redirects are not allowed.", headers, fp)
 
 
 class SpaceCashLedger:
@@ -530,13 +541,64 @@ class SpaceCashLedger:
         text = str(url or "").strip().rstrip("/")
         if not re.fullmatch(r"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{3,240}", text):
             raise ValueError("Peer URL must be an http(s) URL.")
-        return text
+        parsed = urllib.parse.urlsplit(text)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Peer URL must include an http(s) host.")
+        if parsed.username or parsed.password or parsed.fragment:
+            raise ValueError("Peer URL cannot contain credentials or a fragment.")
+        if parsed.query:
+            raise ValueError("Peer base URL cannot contain a query string.")
+        hostname = parsed.hostname.rstrip(".").lower()
+        if protocol.IS_CLOSED_LOOP_MAINNET:
+            allowed_hosts = {
+                item.strip().rstrip(".").lower()
+                for item in os.environ.get(
+                    "SPACECASH_MAINNET_PEER_HOSTS",
+                    "app.northstarprime.net",
+                ).split(",")
+                if item.strip()
+            }
+            if parsed.scheme != "https" or hostname not in allowed_hosts or parsed.port not in {None, 443}:
+                raise ValueError("Closed-loop mainnet peers must use an approved HTTPS host on port 443.")
+        return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
+
+    def _validate_peer_destination(self, url):
+        parsed = urllib.parse.urlsplit(url)
+        hostname = str(parsed.hostname or "").rstrip(".").lower()
+        if not hostname:
+            raise ValueError("Peer URL host is missing.")
+        allow_private = (
+            not protocol.IS_CLOSED_LOOP_MAINNET
+            and os.environ.get("SPACECASH_ALLOW_PRIVATE_PEERS", "").strip() == "1"
+        )
+        try:
+            addresses = {
+                item[4][0]
+                for item in socket.getaddrinfo(
+                    hostname,
+                    parsed.port or (443 if parsed.scheme == "https" else 80),
+                    type=socket.SOCK_STREAM,
+                )
+            }
+        except socket.gaierror as exc:
+            raise ValueError("Peer host could not be resolved.") from exc
+        if not addresses:
+            raise ValueError("Peer host did not resolve to an address.")
+        if allow_private:
+            return
+        for raw_address in addresses:
+            address = ipaddress.ip_address(raw_address)
+            if not address.is_global:
+                raise ValueError(
+                    "Peer destination resolves to a private, local, reserved, or otherwise non-public address."
+                )
 
     def _peer_endpoint(self, url, path):
         return self._normalize_peer_url(url) + "/" + str(path or "").lstrip("/")
 
     def _fetch_peer_json(self, url, timeout=5, max_bytes=5_000_000):
         timeout = max(1, min(30, int(timeout or 5)))
+        self._validate_peer_destination(url)
         req = urllib.request.Request(
             url,
             headers={
@@ -545,7 +607,8 @@ class SpaceCashLedger:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            opener = urllib.request.build_opener(_SpaceCashNoRedirectHandler())
+            with opener.open(req, timeout=timeout) as resp:
                 content_type = resp.headers.get("Content-Type", "")
                 raw = resp.read(max_bytes + 1)
         except urllib.error.URLError as exc:
@@ -1751,15 +1814,21 @@ class SpaceCashLedger:
         producer_policy = producer_policy or {"valid": True, "errors": [], "warnings": []}
         producer_policy_valid = bool(producer_policy.get("valid"))
         import_allowed = status == "peer_ahead_candidate" and snapshot_valid and producer_policy_valid
+        if protocol.IS_CLOSED_LOOP_MAINNET:
+            import_allowed = False
         reorg_required = status == "diverged" and score_winner == "peer"
         reorg_allowed = False
         selected_chain = "local"
         next_action = "none"
         reason = "Local chain remains selected."
         safety_notes = [
-            "This devnet policy does not perform automatic fork reorgs.",
+            "This policy does not perform automatic fork reorgs.",
             "A peer can only be imported when its verified snapshot extends the local tip exactly.",
         ]
+        if protocol.IS_CLOSED_LOOP_MAINNET:
+            safety_notes.append(
+                "Closed-loop mainnet peer import is disabled until blocks carry cryptographic producer authentication; public manifests are informational only."
+            )
         if not snapshot_valid:
             selected_chain = "reject"
             next_action = "reject"
@@ -1771,6 +1840,10 @@ class SpaceCashLedger:
         elif status == "same":
             selected_chain = "tie"
             reason = "Local and peer snapshots have the same digest and tip."
+        elif protocol.IS_CLOSED_LOOP_MAINNET and status == "peer_ahead_candidate":
+            selected_chain = "reject"
+            next_action = "reject"
+            reason = "Closed-loop mainnet peer import is disabled until producer seals are cryptographically authenticated."
         elif import_allowed:
             selected_chain = "peer"
             next_action = "append_import"

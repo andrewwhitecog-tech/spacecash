@@ -15,6 +15,9 @@ The governing commitments are executable in the
 6. Earned-only participation rewards and digital-only NorthStar sinks.
 7. Public source, consensus rules, threat model, and operational evidence.
 
+The source is released under the Apache License 2.0; see the repository
+`LICENSE` file.
+
 Allowed uses include artifact provenance, soulbound relic certificates,
 agent-economy research, game/profile cosmetics, digital powerups, IDR rituals,
 and other in-universe experiences. The required disclosure and re-entry rules

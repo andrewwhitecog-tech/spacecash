@@ -34,6 +34,22 @@ These are safety interlocks, not secrets. `SPACECASH_ADMIN_TOKEN` is a secret
 and must be at least 32 characters, remain outside the repository, and be
 available only to the NSP operator service.
 
+## Runtime durability
+
+The public NorthStar deployment keeps the canonical SQLite ledger and its
+backups on the attached persistent disk. Startup fails closed unless the
+current database passes the normal mainnet readiness audit and a verified,
+restorable backup exists. While the NSP app is running, an hourly in-process
+check refreshes a backup when the newest one reaches 24 hours old.
+
+Each backup uses SQLite's online backup API, is atomically promoted, receives
+a SHA-256 receipt, passes `PRAGMA quick_check`, reruns the SpaceCash readiness
+audit, and is restored into a temporary database for a second deep check.
+Fourteen daily generations are retained by default. The public
+`/api/spacecash/status` response reports backup health without exposing server
+paths. This is part of the NSP deployment and does not create a standalone
+SpaceCash service.
+
 ## Re-entry triggers
 
 The fuller commerce gates immediately become blockers before any of the

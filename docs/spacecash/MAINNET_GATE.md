@@ -19,12 +19,17 @@ automatically when any closed-loop re-entry trigger is proposed.
 
 Current final decision handoff packet: `MAINNET_DECISION_REVIEWER_HANDOFF_2026-06-10.md`.
 
-SpaceCash cannot be called mainnet until every required gate below is complete
-and reviewed. This is an engineering gate, not legal approval.
+The convertible or commerce lane cannot be called mainnet until every required
+gate below is complete and reviewed. This is an engineering gate, not legal
+approval. The separate non-monetary `closed-loop-mainnet` lane is live under
+the enforceable boundaries in `CLOSED_LOOP_MAINNET.md`.
 
 ## Current Status
 
-- Mode: local signed devnet.
+- Default package mode: local signed devnet (`spacecash-devnet-1`).
+- NSP production mode: non-monetary `closed-loop-mainnet`
+  (`spacecash-mainnet-1`), with no sale, cash-out, custody, exchange, or
+  real-world redemption.
 - Ledger: SQLite-backed local state.
 - Wallets: signed browser wallets with encrypted local backup.
 - Monetary policy: `tools\nsp_python.cmd tools\spacecash_monetary_policy.py` publishes the
@@ -211,9 +216,9 @@ The security-review packet is not an audit result. The external review gate
 remains blocked until an auditor reviews the packet source hash, records
 findings, verifies remediation, and signs closure.
 
-## Mainnet Decision Rule
+## Convertible/Commerce Mainnet Decision Rule
 
-Mainnet remains blocked until:
+Convertible or commerce mainnet remains blocked until:
 
 - All required gates are complete.
 - `MANUAL_GATES.md` has reviewer evidence for every manual gate.
@@ -229,5 +234,6 @@ Mainnet remains blocked until:
 - External review is complete.
 - Legal/compliance review clears the intended use.
 
-Until then, all UI, API, and documentation should continue to call SpaceCash a
-local signed devnet.
+Until then, no UI, API, or documentation may describe SPACE as money,
+convertible value, an investment, or an accepted payment instrument. This does
+not revoke the separately disclosed non-monetary closed-loop mainnet.

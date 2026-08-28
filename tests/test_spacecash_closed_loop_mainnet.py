@@ -96,6 +96,76 @@ class ClosedLoopMainnetTests(unittest.TestCase):
         self.assertTrue(payload["readiness"]["mainnet_ready"])
         self.assertFalse(payload["readiness"]["automated_blockers"])
 
+    def test_mainnet_peer_urls_are_https_allowlisted_and_ssrf_safe(self):
+        with tempfile.TemporaryDirectory(prefix="spacecash-mainnet-peer-policy-") as temp_dir:
+            payload = self.run_mainnet(f"""
+                import json
+                from pathlib import Path
+                from spacecash_core import SpaceCashLedger
+
+                ledger = SpaceCashLedger(Path({temp_dir!r}) / "policy.sqlite3")
+                accepted = ledger._normalize_peer_url(
+                    "https://app.northstarprime.net/api/spacecash/chain/manifest"
+                )
+                rejected = {{}}
+                for url in (
+                    "http://app.northstarprime.net",
+                    "https://example.com",
+                    "https://user:pass@app.northstarprime.net",
+                    "https://app.northstarprime.net?redirect=127.0.0.1",
+                    "https://app.northstarprime.net:444",
+                ):
+                    try:
+                        ledger._normalize_peer_url(url)
+                    except ValueError as exc:
+                        rejected[url] = str(exc)
+                try:
+                    ledger._validate_peer_destination("https://127.0.0.1")
+                except ValueError as exc:
+                    private_destination = str(exc)
+                print(json.dumps({{
+                    "accepted": accepted,
+                    "rejected": rejected,
+                    "private_destination": private_destination,
+                }}))
+            """)
+        self.assertEqual(
+            payload["accepted"],
+            "https://app.northstarprime.net/api/spacecash/chain/manifest",
+        )
+        self.assertEqual(len(payload["rejected"]), 5)
+        self.assertIn("non-public address", payload["private_destination"])
+
+    def test_mainnet_rejects_unauthenticated_peer_snapshot_import(self):
+        with tempfile.TemporaryDirectory(prefix="spacecash-mainnet-import-policy-") as temp_dir:
+            payload = self.run_mainnet(f"""
+                import json
+                from pathlib import Path
+                from spacecash_core import SpaceCashLedger
+                from tools.spacecash_candidate import build_candidate
+
+                root = Path({temp_dir!r})
+                local = SpaceCashLedger(root / "local.sqlite3")
+                local.ensure_schema()
+                build_candidate(root / "peer.sqlite3", validator_count=3, validator_quorum=2)
+                peer = SpaceCashLedger(root / "peer.sqlite3")
+                snapshot = peer.chain_snapshot(include_service_data=False)
+                evaluation = local.evaluate_chain_snapshot(snapshot)
+                imported = local.import_chain_snapshot(snapshot, backup=False)
+                print(json.dumps({{
+                    "status": evaluation["status"],
+                    "import_allowed": evaluation["fork_choice"]["import_allowed"],
+                    "next_action": evaluation["fork_choice"]["next_action"],
+                    "imported": imported["imported"],
+                    "reason": imported["reason"],
+                }}))
+            """)
+        self.assertEqual(payload["status"], "peer_ahead_candidate")
+        self.assertFalse(payload["import_allowed"])
+        self.assertEqual(payload["next_action"], "reject")
+        self.assertFalse(payload["imported"])
+        self.assertIn("producer seals", payload["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

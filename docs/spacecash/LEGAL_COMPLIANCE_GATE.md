@@ -3,7 +3,9 @@
 Current reviewer handoff packet: `LEGAL_COMPLIANCE_REVIEWER_HANDOFF_2026-06-10.md`.
 
 This file is not legal advice. It defines the review evidence required before
-real-money or public mainnet use.
+real-money, convertible, custodial, exchange, or real-world redemption use.
+The NSP-integrated non-monetary closed-loop mainnet remains governed by
+`CLOSED_LOOP_MAINNET.md` and re-enters this gate if its product facts change.
 
 ## Required Review
 
@@ -45,7 +47,8 @@ Generate the reviewer workbench packet:
 tools\nsp_python.cmd tools\spacecash_legal_compliance_evidence.py --workbench-out-dir _tmp\spacecash_legal_compliance_workbench --force
 ```
 
-Before real-money or mainnet use, the completed file must pass:
+Before real-money or convertible/commerce mainnet use, the completed file must
+pass:
 
 ```powershell
 tools\nsp_python.cmd tools\spacecash_legal_compliance_evidence.py --verify _tmp\spacecash_legal_compliance_evidence.json --require-complete
@@ -59,6 +62,7 @@ reviewer-completed evidence file passes `--require-complete`.
 
 ## Launch Rule
 
-If this gate is not signed off, SpaceCash must remain described as a local
-signed devnet and must not be presented as mainnet, investment product,
-exchange-listed asset, or legal tender.
+If this gate is not signed off, SpaceCash must not be presented as convertible
+money, an investment product, an exchange-listed asset, legal tender, or a
+payment instrument. The launched closed-loop mainnet must retain its explicit
+no-monetary-value disclosure and code-enforced prohibitions.

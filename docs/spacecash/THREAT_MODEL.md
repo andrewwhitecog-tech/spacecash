@@ -1,8 +1,9 @@
 # SpaceCash Threat Model
 
-SpaceCash is still a local signed devnet. This document names the current
-security assumptions and mainnet blockers so engineering work does not drift
-into launch claims before the system is ready.
+SpaceCash defaults to a local signed devnet and also runs an NSP-integrated,
+non-monetary `closed-loop-mainnet` profile. This document names the shared
+security assumptions and the blockers that reactivate before any monetary,
+custodial, exchange, or real-world redemption expansion.
 
 ## Assets
 
@@ -25,7 +26,7 @@ into launch claims before the system is ready.
   audit records.
 - Mainnet decision evidence, reviewed source hash, release checksum manifests,
   approved allocation pointer, gate evidence pointers, and launch authorization.
-- Ledger integrity in `spacecash_devnet.sqlite3`.
+- Ledger integrity in the selected profile's canonical SQLite database.
 - Total supply invariant and treasury balance.
 - Signed transaction payloads, nonces, and mempool state.
 - Block hashes, producer ids, producer seals, snapshots, and chain manifests.
@@ -41,7 +42,8 @@ into launch claims before the system is ready.
 - Flask site: user-facing wallet and checkout surface. It is not the consensus
   boundary.
 - SpaceCash daemon: standalone ledger API and node surface.
-- SQLite ledger: current source of truth for local devnet state.
+- SQLite ledger: protocol state; NorthStar Prime is the system of record for the
+  production closed-loop profile.
 - Peer HTTP APIs: untrusted until manifest, snapshot, signature, policy, and
   append-only checks pass.
 - Product catalog: trusted only for product metadata and eligibility, not for
@@ -60,8 +62,9 @@ into launch claims before the system is ready.
 - Audit recomputes block linkage, balances, total supply, signed spend
   integrity, mempool validity, and checkpoint vote validity.
 - Snapshots digest blocks, transactions, and wallet public keys together.
-- Sync import accepts only verified append-only peer-ahead snapshots and writes
-  a SQLite backup before import.
+- Devnet sync import accepts only verified append-only peer-ahead snapshots and
+  writes a SQLite backup before import. Closed-loop mainnet import is disabled
+  until producer authentication is cryptographically enforced.
 - Producer allowlist rejects new versioned blocks from unknown producers.
 - Bootstrap peers and peer gossip are explicit local configuration.
 - Checkpoint votes must be signed by locally registered validator wallets.

@@ -6,6 +6,20 @@ The default profile remains the `spacecash-devnet-1` development network. The pr
 
 The production disclosure is: **SPACE is play money for the NorthStar universe. It cannot be bought, sold, or cashed out, and has no monetary value.** See [CLOSED_LOOP_MAINNET.md](docs/spacecash/CLOSED_LOOP_MAINNET.md).
 
+## Live NSP mainnet
+
+NorthStar Prime is the production system of record. Public read-only proofs:
+
+- [application health](https://app.northstarprime.net/health)
+- [SpaceCash status](https://app.northstarprime.net/api/spacecash/status)
+- [SpaceCash readiness](https://app.northstarprime.net/api/spacecash/readiness)
+
+The production chain is `spacecash-mainnet-1` under the
+`closed-loop-mainnet` profile. The reusable engine is open source here; wallet,
+arcade reward, operator-review, digital-sink, explorer, deployment, and alert
+surfaces remain integrated into NorthStar Prime. See the
+[controlled production operations runbook](docs/spacecash/CONTROLLED_RENDER_RELEASE.md).
+
 ## What works
 
 - SQLite-backed append-only ledger with deterministic block and chain manifests
@@ -53,9 +67,11 @@ The default database is stored in the current user's application-data directory.
 
 ## Safety status
 
-The readiness endpoint intentionally fails closed. A passing unit test suite establishes software behavior only; it does not establish legal approval, economic safety, operational custody, an external security audit, or public-mainnet readiness. See [MAINNET_GATE.md](docs/spacecash/MAINNET_GATE.md), [THREAT_MODEL.md](docs/spacecash/THREAT_MODEL.md), and [SECURITY.md](SECURITY.md).
+The readiness endpoint intentionally fails closed. A passing unit test suite establishes software behavior only; it does not establish legal approval, economic safety, operational custody, or an external security audit. The NSP-integrated non-monetary profile has separate runtime readiness and release controls. See [MAINNET_GATE.md](docs/spacecash/MAINNET_GATE.md), [THREAT_MODEL.md](docs/spacecash/THREAT_MODEL.md), and [SECURITY.md](SECURITY.md).
 
-Do not use real funds, private production credentials, regulated customer data, or irreversible value on this alpha devnet.
+Do not use real funds, private production credentials, regulated customer data,
+or irreversible value with SpaceCash. The production profile is deliberately
+non-monetary and closed-loop.
 
 ## License
 

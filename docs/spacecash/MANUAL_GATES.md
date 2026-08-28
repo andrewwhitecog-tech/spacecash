@@ -1,8 +1,9 @@
 # SpaceCash Manual Gates
 
 These gates cannot be completed by code alone. They require human review,
-evidence, and signoff before SpaceCash can move from local signed devnet to any
-mainnet or real-money use.
+evidence, and signoff before SpaceCash can move into convertible, custodial,
+exchange, real-money, or real-world redemption use. They are dormant—not
+deleted—while the launched NSP profile remains a non-monetary closed loop.
 
 ## Required Evidence
 
@@ -67,9 +68,11 @@ A release bundle is reviewable only when:
 - Manual gate documents are included in `docs/spacecash`.
 - The final source hash is archived with reviewer signoff.
 
-## Mainnet Rule
+## Convertible/Commerce Mainnet Rule
 
-`mainnet_ready` must remain false until all gates above have evidence and
-signoff, and `tools\spacecash_mainnet_decision.py --require-complete` passes
-against the final approved decision file. A clean candidate ledger only proves
-automated readiness; it is not a launch authorization.
+The convertible/commerce readiness decision must remain false until all gates
+above have evidence and signoff, and
+`tools\spacecash_mainnet_decision.py --require-complete` passes against the
+final approved decision file. A clean candidate ledger only proves automated
+readiness; it is not authorization to add monetary or custodial behavior to the
+closed-loop mainnet.

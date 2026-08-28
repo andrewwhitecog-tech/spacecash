@@ -132,7 +132,11 @@ def build_candidate(db_path, bootstrap_peers=None, keys_out=None, force=False, v
         })
         checkpoint_votes.append((checkpoint.get("vote") or {}).get("vote_id"))
 
-    peers = bootstrap_peers or ["http://127.0.0.1:8876"]
+    peers = bootstrap_peers or (
+        ["https://app.northstarprime.net"]
+        if protocol.IS_CLOSED_LOOP_MAINNET
+        else ["http://127.0.0.1:8876"]
+    )
     ledger.set_bootstrap_peers([
         {
             "url": url,
