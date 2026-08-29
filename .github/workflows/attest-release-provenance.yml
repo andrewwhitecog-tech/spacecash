@@ -1,13 +1,18 @@
 name: attest-release-provenance
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
         description: Existing release tag whose assets will be verified and attested
         required: true
-        default: v0.2.2
         type: string
+
+concurrency:
+  group: attest-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -21,9 +26,13 @@ jobs:
       - name: Download and verify release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Unsupported release tag: $RELEASE_TAG" >&2
+            exit 2
+          fi
           mkdir release-assets
           gh release download "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
@@ -31,7 +40,14 @@ jobs:
           test -f release-assets/SHA256SUMS.txt
           (
             cd release-assets
-            sha256sum --check SHA256SUMS.txt
+            test -s SHA256SUMS.txt
+            if grep -Ev '^[0-9A-Fa-f]{64}  northstar_spacecash-[A-Za-z0-9._+-]+\.(whl|tar\.gz)$' SHA256SUMS.txt | grep -q .; then
+              echo "SHA256SUMS.txt contains an unexpected subject" >&2
+              exit 2
+            fi
+            grep -Eq '  northstar_spacecash-.*\.whl$' SHA256SUMS.txt
+            grep -Eq '  northstar_spacecash-.*\.tar\.gz$' SHA256SUMS.txt
+            sha256sum --check --strict SHA256SUMS.txt
           )
 
       - name: Create keyless build-provenance attestations
