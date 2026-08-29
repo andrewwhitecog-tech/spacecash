@@ -411,8 +411,8 @@ class SpaceCashDaemonHandler(BaseHTTPRequestHandler):
             self.not_found()
         except ValueError as exc:
             self.send_json({"error": str(exc)}, 400)
-        except Exception as exc:
-            self.send_json({"error": f"SpaceCash daemon error: {exc}"}, 500)
+        except Exception:
+            self.send_json({"error": "SpaceCash daemon internal error."}, 500)
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -615,8 +615,8 @@ class SpaceCashDaemonHandler(BaseHTTPRequestHandler):
             self.send_json({"error": str(exc)}, 401)
         except ValueError as exc:
             self.send_json({"error": str(exc)}, 400)
-        except Exception as exc:
-            self.send_json({"error": f"SpaceCash daemon error: {exc}"}, 500)
+        except Exception:
+            self.send_json({"error": "SpaceCash daemon internal error."}, 500)
 
 
 class SpaceCashHTTPServer(ThreadingHTTPServer):

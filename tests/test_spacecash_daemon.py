@@ -96,6 +96,22 @@ class SpaceCashDaemonTestCase(unittest.TestCase):
 
 
 class DaemonRouteTests(SpaceCashDaemonTestCase):
+    def test_internal_errors_are_not_reflected_to_clients(self):
+        marker = "private-ledger-path-C:/operator/secret.sqlite3"
+        original_status = self.ledger.status
+        self.ledger.status = lambda: (_ for _ in ()).throw(RuntimeError(marker))
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as failure:
+                self.get_json("/status")
+            self.assertEqual(failure.exception.code, 500)
+            error_body = json.loads(failure.exception.read().decode("utf-8"))
+            failure.exception.close()
+        finally:
+            self.ledger.status = original_status
+
+        self.assertEqual("SpaceCash daemon internal error.", error_body["error"])
+        self.assertNotIn(marker, json.dumps(error_body))
+
     def test_health_config_status_and_audit_routes(self):
         status, health = self.get_json("/health")
         self.assertEqual(status, 200)
