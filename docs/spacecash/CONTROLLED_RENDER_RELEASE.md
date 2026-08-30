@@ -75,12 +75,14 @@ runs a destructive provider restore.
 
 The dedicated SpaceCash release guard runs as a one-shot task every five
 minutes and at operator logon. A second NSP live-operations contract monitor
-runs every fifteen minutes and at logon. It requires the local guard to be
-healthy and fresh, verifies the public cloud contract reports
-`workstation_attested`, and requires the guard's exact 40-character release
-commit to equal the commit reported by public application health. A mismatch
-or unavailable proof returns a nonzero task result and writes an atomic
-machine-local state receipt.
+runs every fifteen minutes and at logon. Its required checks cover the public
+Passport page, canonical manifest and non-monetary policy, privacy-preserving
+aggregate metrics, local release-guard freshness, and exact deployed-commit
+alignment. It also requires the public Ops contract to expose both the release
+guard and Passport contract as `workstation_attested`. A mismatch or
+unavailable proof returns a nonzero task result and writes atomic contract and
+launcher receipts. The bounded launcher terminates a stalled child check after
+90 seconds and propagates its real exit code to Task Scheduler.
 
 The broader NorthStar Runtime Guard and the snapshot guard remain independent
 layers. The snapshot guard runs hourly and at logon. These guards return real
