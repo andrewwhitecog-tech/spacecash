@@ -12,13 +12,17 @@ stay in the private NorthStar operations repository.
 
 ## Public evidence
 
-The deployment exposes three read-only evidence endpoints:
+The deployment exposes these public evidence and product endpoints:
 
 - `https://app.northstarprime.net/health` proves the NSP application is serving;
+- `https://app.northstarprime.net/spacecash/passport` is the integrated
+  Founding 100 Passport product surface;
 - `https://app.northstarprime.net/api/spacecash/status` reports chain identity,
   NSP integration, and redacted durability evidence;
 - `https://app.northstarprime.net/api/spacecash/readiness` reports mainnet
-  readiness, audit validity, and blocker lists.
+  readiness, audit validity, and blocker lists; and
+- `https://app.northstarprime.net/api/ops/health` publishes the NSP operations
+  contract, including the cloud-side SpaceCash guard posture.
 
 A healthy release reports:
 
@@ -69,8 +73,17 @@ runs a destructive provider restore.
 
 ## Failure visibility
 
-The NorthStar Runtime Guard runs as a one-shot task every five minutes and at
-operator logon. The snapshot guard runs hourly and at logon. Both return real
+The dedicated SpaceCash release guard runs as a one-shot task every five
+minutes and at operator logon. A second NSP live-operations contract monitor
+runs every fifteen minutes and at logon. It requires the local guard to be
+healthy and fresh, verifies the public cloud contract reports
+`workstation_attested`, and requires the guard's exact 40-character release
+commit to equal the commit reported by public application health. A mismatch
+or unavailable proof returns a nonzero task result and writes an atomic
+machine-local state receipt.
+
+The broader NorthStar Runtime Guard and the snapshot guard remain independent
+layers. The snapshot guard runs hourly and at logon. These guards return real
 exit codes, reject overlapping instances, start when available, and retry
 failures.
 

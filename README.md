@@ -11,14 +11,21 @@ The production disclosure is: **SPACE is play money for the NorthStar universe. 
 NorthStar Prime is the production system of record. Public read-only proofs:
 
 - [application health](https://app.northstarprime.net/health)
+- [Founding 100 Passport](https://app.northstarprime.net/spacecash/passport)
 - [SpaceCash status](https://app.northstarprime.net/api/spacecash/status)
 - [SpaceCash readiness](https://app.northstarprime.net/api/spacecash/readiness)
+- [NSP operations contract](https://app.northstarprime.net/api/ops/health)
 
 The production chain is `spacecash-mainnet-1` under the
 `closed-loop-mainnet` profile. The reusable engine is open source here; wallet,
 arcade reward, operator-review, digital-sink, explorer, deployment, and alert
 surfaces remain integrated into NorthStar Prime. See the
 [controlled production operations runbook](docs/spacecash/CONTROLLED_RENDER_RELEASE.md).
+
+The Passport is an NSP product surface over this engine, not a second wallet,
+token, chain, or standalone SpaceCash application. Its signed participation
+claims use the same canonical `spacecash-mainnet-1` ledger and the same
+closed-loop non-monetary boundary.
 
 ## What works
 
