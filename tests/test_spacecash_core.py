@@ -218,6 +218,22 @@ class CheckpointVoteTests(LedgerTestCase):
 
         self.assertTrue(self.ledger.audit()["valid"])
 
+    def test_checkpoint_quorum_persists_across_authorized_child_blocks(self):
+        validator, validator_key = make_wallet(self.ledger, "Validator")
+        recipient, _ = make_wallet(self.ledger, "Recipient")
+        self.ledger.add_validator(validator["address"])
+        payload = self.ledger.checkpoint_vote_payload(validator["address"])
+        cp_height = payload["height"]
+        self.ledger.submit_checkpoint_vote({
+            "auth_payload": payload,
+            "signature": sign_payload(validator_key, payload),
+        })
+        self.ledger.faucet(recipient["address"], "5")
+        quorum = self.ledger.checkpoint_quorum()
+        self.assertTrue(quorum["quorum_reached"])
+        self.assertEqual(quorum["checkpoint_height"], cp_height)
+        self.assertGreater(quorum["height"], cp_height)
+
 
 class MainnetReadinessTests(LedgerTestCase):
     def test_readiness_reports_automated_and_manual_blockers(self):

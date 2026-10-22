@@ -980,6 +980,7 @@ class SpaceCashLedger:
             conn.close()
 
     def checkpoint_quorum(self, height=None, block_hash=None, chain_digest=None):
+        explicit_target = any(item is not None for item in (height, block_hash, chain_digest))
         manifest = self.chain_manifest()
         height = int(height if height is not None else manifest.get("height"))
         block_hash = str(block_hash or manifest.get("tip_hash") or "").strip().upper()
@@ -1006,6 +1007,64 @@ class SpaceCashLedger:
                     continue
                 voted.append(validator)
                 votes.append(vote)
+            checkpoint_height = height
+            checkpoint_block_hash = block_hash
+            checkpoint_chain_digest = chain_digest
+            if not explicit_target and policy["validators"] and len(voted) < policy["quorum"]:
+                allowed_producers = set(self._allowed_producers_locked(conn))
+                candidate_targets = conn.execute("""
+                    SELECT DISTINCT height, block_hash, chain_digest
+                    FROM checkpoint_votes
+                    WHERE status = 'valid'
+                      AND height <= ?
+                    ORDER BY height DESC
+                """, (height,)).fetchall()
+                for target in candidate_targets:
+                    cp_height = int(target["height"])
+                    cp_hash = str(target["block_hash"] or "").strip().upper()
+                    cp_digest = str(target["chain_digest"] or "").strip().upper()
+                    block_row = conn.execute(
+                        "SELECT block_hash FROM blocks WHERE height = ?",
+                        (cp_height,),
+                    ).fetchone()
+                    if not block_row or str(block_row["block_hash"] or "").strip().upper() != cp_hash:
+                        continue
+                    trailing_blocks = conn.execute(
+                        "SELECT producer_id FROM blocks WHERE height > ? ORDER BY height",
+                        (cp_height,),
+                    ).fetchall()
+                    if any((row["producer_id"] or protocol.PRODUCER_ID) not in allowed_producers for row in trailing_blocks):
+                        continue
+                    cp_rows = conn.execute("""
+                        SELECT *
+                        FROM checkpoint_votes
+                        WHERE status = 'valid'
+                          AND height = ?
+                          AND block_hash = ?
+                          AND chain_digest = ?
+                        ORDER BY updated_at DESC, vote_id
+                    """, (cp_height, cp_hash, cp_digest)).fetchall()
+                    cp_votes = []
+                    cp_voted = []
+                    for row in cp_rows:
+                        vote_errors = []
+                        vote_warnings = []
+                        self._audit_checkpoint_vote(conn, row, policy["validators"], vote_errors, vote_warnings)
+                        if vote_errors:
+                            continue
+                        vote = self._checkpoint_vote_from_row(row)
+                        validator = vote["validator_address"]
+                        if validator not in policy["validators"] or validator in cp_voted:
+                            continue
+                        cp_voted.append(validator)
+                        cp_votes.append(vote)
+                    if len(cp_voted) >= policy["quorum"]:
+                        votes = cp_votes
+                        voted = cp_voted
+                        checkpoint_height = cp_height
+                        checkpoint_block_hash = cp_hash
+                        checkpoint_chain_digest = cp_digest
+                        break
             missing = [address for address in policy["validators"] if address not in voted]
             return {
                 "chain_id": protocol.CHAIN_ID,
@@ -1013,6 +1072,9 @@ class SpaceCashLedger:
                 "height": height,
                 "block_hash": block_hash,
                 "chain_digest": chain_digest,
+                "checkpoint_height": checkpoint_height,
+                "checkpoint_block_hash": checkpoint_block_hash,
+                "checkpoint_chain_digest": checkpoint_chain_digest,
                 "validators": policy["validators"],
                 "quorum": policy["quorum"],
                 "eligible_votes": len(voted),
